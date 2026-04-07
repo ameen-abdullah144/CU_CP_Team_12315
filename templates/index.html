@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Traffic Management Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', sans-serif;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  header {
+    background: #161b22;
+    padding: 14px 24px;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+
+  .live-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #3fb950;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 14px;
+    padding: 14px;
+    height: calc(100vh - 56px);
+  }
+
+  /* ── Video panel ── */
+  .video-panel {
+    background: #010409;
+    border-radius: 10px;
+    border: 1px solid #30363d;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .video-panel img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  /* ── Side panel ── */
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+
+  .card {
+    background: #161b22;
+    border-radius: 10px;
+    border: 1px solid #30363d;
+    padding: 16px;
+  }
+  .card-title {
+    font-size: 0.72rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 12px;
+  }
+
+  /* ── Count ── */
+  .count-number {
+    font-size: 3.2rem;
+    font-weight: 700;
+    color: #58a6ff;
+    text-align: center;
+    line-height: 1;
+  }
+  .count-sub {
+    text-align: center;
+    color: #8b949e;
+    font-size: 0.8rem;
+    margin-top: 6px;
+  }
+
+  /* ── Alarms ── */
+  .alarm-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 7px;
+    margin-bottom: 6px;
+    font-size: 0.84rem;
+    font-weight: 500;
+    transition: background 0.3s;
+  }
+  .alarm-row.on {
+    background: #3d1a1a;
+    border: 1px solid #f85149;
+    color: #f85149;
+  }
+  .alarm-row.off {
+    background: #1c2128;
+    border: 1px solid #30363d;
+    color: #8b949e;
+  }
+  .alarm-icon { font-size: 1rem; }
+
+  /* ── Events log ── */
+  .events-wrap { flex: 1; overflow-y: auto; }
+  .event-row {
+    padding: 7px 0;
+    border-bottom: 1px solid #21262d;
+    font-size: 0.76rem;
+  }
+  .event-row:last-child { border-bottom: none; }
+  .event-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+  }
+  .badge {
+    padding: 1px 7px;
+    border-radius: 20px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    background: #1f3a5f;
+    color: #58a6ff;
+  }
+  .badge.congestion { background: #3d2200; color: #f0883e; }
+  .badge.crash      { background: #3d1a1a; color: #f85149; }
+  .badge.stopped    { background: #1a2d1a; color: #3fb950; }
+  .event-ts  { color: #8b949e; }
+  .event-msg { color: #cdd9e5; line-height: 1.4; }
+
+  .empty { color: #8b949e; font-size: 0.8rem; padding: 8px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="live-dot"></div>
+  <h1>🚦 Live Traffic Management System</h1>
+</header>
+
+<div class="layout">
+
+  <!-- Live Video -->
+  <div class="video-panel">
+    <img src="/video_feed" alt="Live Camera Feed">
+  </div>
+
+  <!-- Side -->
+  <div class="side-panel">
+
+    <!-- Vehicle Count -->
+    <div class="card">
+      <div class="card-title">Vehicle Count</div>
+      <div class="count-number" id="vehicleCount">—</div>
+      <div class="count-sub">vehicles currently detected</div>
+    </div>
+
+    <!-- Active Alarms -->
+    <div class="card">
+      <div class="card-title">Active Alarms</div>
+      <div id="alarmsList">
+        <div class="alarm-row off">
+          <span class="alarm-icon">✅</span> Loading...
+        </div>
+      </div>
+    </div>
+
+    <!-- Events Log -->
+    <div class="card events-wrap">
+      <div class="card-title">Recent Events Log</div>
+      <div id="eventsList"><p class="empty">No events yet.</p></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const ALARM_LABELS = {
+    congestion: "High Congestion",
+    crash:      "Crash / Incident"
+  };
+
+  function getBadgeClass(type) {
+    if (type === "congestion") return "badge congestion";
+    if (type === "crash")      return "badge crash";
+    if (type.startsWith("stopped")) return "badge stopped";
+    return "badge";
+  }
+
+  function fetchStatus() {
+    fetch("/api/status")
+      .then(r => r.json())
+      .then(data => {
+
+        // ── Vehicle count ──────────────────────────────────────────────────
+        document.getElementById("vehicleCount").textContent = data.vehicle_count;
+
+        // ── Alarms ────────────────────────────────────────────────────────
+        const alarmsEl = document.getElementById("alarmsList");
+        const seen     = new Set();
+        let html       = "";
+
+        for (const [key, active] of Object.entries(data.alarms)) {
+          const label = key.startsWith("stopped")
+            ? "Stopped Vehicle"
+            : (ALARM_LABELS[key] || key);
+          if (seen.has(label)) continue;
+          seen.add(label);
+          html += `
+            <div class="alarm-row ${active ? 'on' : 'off'}">
+              <span class="alarm-icon">${active ? '🚨' : '✅'}</span>
+              ${label}
+            </div>`;
+        }
+
+        if (!html) {
+          html = `<div class="alarm-row off">
+            <span class="alarm-icon">✅</span> No active alarms
+          </div>`;
+        }
+        alarmsEl.innerHTML = html;
+
+        // ── Events log ────────────────────────────────────────────────────
+        const eventsEl = document.getElementById("eventsList");
+        if (!data.events || data.events.length === 0) {
+          eventsEl.innerHTML = `<p class="empty">No events yet.</p>`;
+          return;
+        }
+        eventsEl.innerHTML = data.events.map(([ts, type, msg]) => `
+          <div class="event-row">
+            <div class="event-meta">
+              <span class="${getBadgeClass(type)}">${type}</span>
+              <span class="event-ts">${ts}</span>
+            </div>
+            <div class="event-msg">${msg}</div>
+          </div>
+        `).join("");
+
+      })
+      .catch(() => {});
+  }
+
+  setInterval(fetchStatus, 1500);
+  fetchStatus();
+</script>
+</body>
+</html>
